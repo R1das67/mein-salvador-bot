@@ -140,7 +140,7 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
         hooks = []
     for hook in hooks:
         # Whitelist User dürfen Webhooks behalten
-        if isinstance(hook.user, discord.Member) and is_whitelisted(hook.user):
+        if hook.user and is_whitelisted(hook.user):
             continue
         try:
             await hook.delete(reason="Anti-Webhook aktiv")
@@ -203,4 +203,5 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
 
