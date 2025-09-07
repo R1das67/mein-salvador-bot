@@ -1,1 +1,1 @@
-worker: python el_salvador.py
+worker: python el_salvador.p
