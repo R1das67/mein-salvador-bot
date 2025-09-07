@@ -1,0 +1,1 @@
+worker: python el_salvador.py
