@@ -14,10 +14,10 @@ TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 
 # Nur eine Whitelist für User (IDs hier eintragen)
 WHITELIST = {
-              662596869221908480,843180408152784936,
-              1322832586829205505,235148962103951360,
-              830212609961754654,1379547085484855397,
-              557628352828014614,1179181100774457374,
+             843180408152784936,1271186898408308789,
+             1184926197445038113,662596869221908480,
+             235148962103951360,557628352828014614,
+             651095740390834176,
 }
 
 # Invite-Settings
@@ -203,6 +203,7 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
 
 
 
