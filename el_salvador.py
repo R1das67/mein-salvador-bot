@@ -9,16 +9,10 @@ from discord import AuditLogAction, Forbidden, HTTPException, NotFound
 from discord.ext import commands
 
 # ---------- Konfiguration ----------
-# Token aus Environment (Railway Variable: DISCORD_TOKEN)
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 
-# Nur eine Whitelist für User (IDs hier eintragen)
-WHITELIST = {
-             843180408152784936,1271186898408308789,
-             1184926197445038113,662596869221908480,
-             235148962103951360,557628352828014614,
-             651095740390834176,
-}
+# Deine User-ID (du bist Bot-Superadmin)
+BOT_ADMIN_ID = 843180408152784936 
 
 # Invite-Settings
 INVITE_SPAM_WINDOW_SECONDS = 20
@@ -49,8 +43,16 @@ def log(*args):
     if VERBOSE:
         print("[LOG]", *args)
 
+# Whitelist + Blacklist (dynamisch)
+whitelist: set[int] = set()
+blacklist: set[int] = set()
+
 def is_whitelisted(member: discord.Member) -> bool:
-    return member and member.id in WHITELIST
+    return member and member.id in whitelist
+
+def is_bot_admin(ctx: commands.Context) -> bool:
+    """Nur Server-Owner oder BOT_ADMIN_ID darf sensible Commands ausführen"""
+    return ctx.author.id == BOT_ADMIN_ID or (ctx.guild and ctx.author.id == ctx.guild.owner_id)
 
 async def safe_delete_message(msg: discord.Message):
     try:
@@ -139,7 +141,6 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
     except (Forbidden, HTTPException):
         hooks = []
     for hook in hooks:
-        # Whitelist User dürfen Webhooks behalten
         if hook.user and is_whitelisted(hook.user):
             continue
         try:
@@ -184,12 +185,19 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(guild, actor, f"Löschen des Kanals '{channel.name}'")
 
-# Anti Bot Join
+# Anti Bot Join & Blacklist Check
 @bot.event
 async def on_member_join(member: discord.Member):
+    guild = member.guild
+
+    # Blacklist: sofort kicken
+    if member.id in blacklist:
+        await kick_member(guild, member, "User ist auf der Blacklist")
+        return
+
     if not member.bot:
         return
-    guild = member.guild
+
     inviter = await actor_from_audit_log(guild, AuditLogAction.bot_add, target_id=member.id, within_seconds=60)
     if isinstance(inviter, discord.Member):
         if not is_whitelisted(inviter):
@@ -198,13 +206,57 @@ async def on_member_join(member: discord.Member):
         else:
             log(f"Whitelisted inviter {inviter} hat Bot {member} eingeladen – kein Ban.")
 
+# ---------- Commands ----------
+@bot.hybrid_command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
+async def add_whitelist(ctx: commands.Context, user_id: int):
+    if not is_bot_admin(ctx):
+        return await ctx.reply("❌ Keine Berechtigung.")
+    whitelist.add(user_id)
+    await ctx.reply(f"✅ User `{user_id}` wurde zur Whitelist hinzugefügt.")
+
+@bot.hybrid_command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
+async def remove_whitelist(ctx: commands.Context, user_id: int):
+    if not is_bot_admin(ctx):
+        return await ctx.reply("❌ Keine Berechtigung.")
+    whitelist.discard(user_id)
+    await ctx.reply(f"✅ User `{user_id}` wurde von der Whitelist entfernt.")
+
+@bot.hybrid_command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
+async def show_whitelist(ctx: commands.Context):
+    if not whitelist:
+        return await ctx.reply("ℹ️ Whitelist ist leer.")
+    users = []
+    for uid in whitelist:
+        user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
+        users.append(user.name if user else str(uid))
+    await ctx.reply("📜 Whitelist:\n" + "\n".join(users))
+
+@bot.hybrid_command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
+async def add_blacklist(ctx: commands.Context, user_id: int):
+    if not is_bot_admin(ctx):
+        return await ctx.reply("❌ Keine Berechtigung.")
+    blacklist.add(user_id)
+    await ctx.reply(f"✅ User `{user_id}` wurde zur Blacklist hinzugefügt.")
+
+@bot.hybrid_command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
+async def remove_blacklist(ctx: commands.Context, user_id: int):
+    if not is_bot_admin(ctx):
+        return await ctx.reply("❌ Keine Berechtigung.")
+    blacklist.discard(user_id)
+    await ctx.reply(f"✅ User `{user_id}` wurde von der Blacklist entfernt.")
+
+@bot.hybrid_command(name="showblacklist", description="Zeigt alle User in der Blacklist")
+async def show_blacklist(ctx: commands.Context):
+    if not blacklist:
+        return await ctx.reply("ℹ️ Blacklist ist leer.")
+    users = []
+    for uid in blacklist:
+        user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
+        users.append(user.name if user else str(uid))
+    await ctx.reply("🚫 Blacklist:\n" + "\n".join(users))
+
 # ---------- Start ----------
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
-
-
-
-
