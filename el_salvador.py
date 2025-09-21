@@ -109,6 +109,13 @@ webhook_strikes: defaultdict[int, int] = defaultdict(int)
 @bot.event
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
+    
+    # Slash-Commands mit Discord synchronisieren
+    try:
+        synced = await bot.tree.sync()
+        log(f"{len(synced)} Slash-Commands synchronisiert.")
+    except Exception as e:
+        log(f"Fehler beim Synchronisieren der Commands: {e}")
 
 # Anti Invite Link
 @bot.event
@@ -260,3 +267,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
