@@ -215,18 +215,18 @@ async def on_member_join(member: discord.Member):
 
 # ---------- Commands ----------
 @bot.hybrid_command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
-async def add_whitelist(ctx: commands.Context, user_id: int):
+async def add_whitelist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    whitelist.add(user_id)
-    await ctx.reply(f"✅ User `{user_id}` wurde zur Whitelist hinzugefügt.")
+    whitelist.add(user.id)
+    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde zur Whitelist hinzugefügt.")
 
 @bot.hybrid_command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
-async def remove_whitelist(ctx: commands.Context, user_id: int):
+async def remove_whitelist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    whitelist.discard(user_id)
-    await ctx.reply(f"✅ User `{user_id}` wurde von der Whitelist entfernt.")
+    whitelist.discard(user.id)
+    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde von der Whitelist entfernt.")
 
 @bot.hybrid_command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
 async def show_whitelist(ctx: commands.Context):
@@ -239,18 +239,18 @@ async def show_whitelist(ctx: commands.Context):
     await ctx.reply("📜 Whitelist:\n" + "\n".join(users))
 
 @bot.hybrid_command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
-async def add_blacklist(ctx: commands.Context, user_id: int):
+async def add_blacklist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    blacklist.add(user_id)
-    await ctx.reply(f"✅ User `{user_id}` wurde zur Blacklist hinzugefügt.")
+    blacklist.add(user.id)
+    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde zur Blacklist hinzugefügt.")
 
 @bot.hybrid_command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
-async def remove_blacklist(ctx: commands.Context, user_id: int):
+async def remove_blacklist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    blacklist.discard(user_id)
-    await ctx.reply(f"✅ User `{user_id}` wurde von der Blacklist entfernt.")
+    blacklist.discard(user.id)
+    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde von der Blacklist entfernt.")
 
 @bot.hybrid_command(name="showblacklist", description="Zeigt alle User in der Blacklist")
 async def show_blacklist(ctx: commands.Context):
@@ -267,4 +267,3 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
