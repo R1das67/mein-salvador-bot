@@ -118,8 +118,8 @@ async def on_ready():
     # Nachricht an alle Server-Owner oder Moderator-Kanal
     for guild in bot.guilds:
         message_text = (
-            "🌐❗**__Erneuerung der Whitelist und Blacklist__**❗🌐\n"
-            f"@{guild.owner} **lieber Eigentümer vom Server ({guild.name}), der Bot __Globex Security__ "
+            "🌐**__Erneuerung der Whitelist und Blacklist__**🌐\n"
+            f"{guild.owner.mention} **lieber Eigentümer vom Server ({guild.name}), der Bot __Globex Security__ "
             "wurde neugestartet bzw. wieder online gestellt darum erneuern Sie bitte Ihre Black -und Whitelist.**\n"
             "`Sie werden in ca. 1 Monat erneut eine DM bekommen mit der gleichen Nachricht bitte haben Sie Verständnis`"
         )
@@ -301,3 +301,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
