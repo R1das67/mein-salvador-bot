@@ -115,6 +115,12 @@ async def on_ready():
     except Exception as e:
         log(f"Fehler beim Synchronisieren der Commands: {e}")
 
+    # Präsenz immer setzen, egal ob Sync erfolgreich war
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Game("Bereit zum Beschützen!")
+    )
+
     # Nachricht an alle Server-Owner oder Moderator-Kanal
     for guild in bot.guilds:
         message_text = (
@@ -301,4 +307,3 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
