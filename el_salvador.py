@@ -30,6 +30,7 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.bans = True
+intents.presences = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -307,3 +308,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
