@@ -109,13 +109,47 @@ webhook_strikes: defaultdict[int, int] = defaultdict(int)
 @bot.event
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
-    
-    # Slash-Commands mit Discord synchronisieren
     try:
         synced = await bot.tree.sync()
         log(f"{len(synced)} Slash-Commands synchronisiert.")
     except Exception as e:
         log(f"Fehler beim Synchronisieren der Commands: {e}")
+
+    # Nachricht an alle Server-Owner oder Moderator-Kanal
+    for guild in bot.guilds:
+        message_text = (
+            "🌐❗**__Erneuerung der Whitelist und Blacklist__**❗🌐\n"
+            f"@{guild.owner} **lieber Eigentümer vom Server ({guild.name}), der Bot __Globex Security__ "
+            "wurde neugestartet bzw. wieder online gestellt darum erneuern Sie bitte Ihre Black -und Whitelist.**\n"
+            "`Sie werden in ca. 1 Monat erneut eine DM bekommen mit der gleichen Nachricht bitte haben Sie Verständnis`"
+        )
+
+        # 1. DM an Owner versuchen
+        try:
+            if guild.owner:
+                await guild.owner.send(message_text)
+                log(f"DM an {guild.owner} gesendet ({guild.name}).")
+                continue  # DM erfolgreich → keine Nachricht im Server nötig
+        except discord.Forbidden:
+            log(f"Konnte {guild.owner} keine DM senden ({guild.name}).")
+
+        # 2. Kanal "moderator-only" suchen
+        mod_channel = discord.utils.get(guild.text_channels, name="moderator-only")
+        if mod_channel and mod_channel.permissions_for(guild.me).send_messages:
+            try:
+                await mod_channel.send(message_text)
+                log(f"Nachricht in #{mod_channel.name} von {guild.name} gesendet.")
+                continue
+            except discord.Forbidden:
+                log(f"Konnte in #{mod_channel.name} von {guild.name} keine Nachricht senden.")
+
+        # 3. Fallback: Systemkanal nutzen
+        if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
+            try:
+                await guild.system_channel.send(message_text)
+                log(f"Nachricht im Systemkanal von {guild.name} gesendet.")
+            except discord.Forbidden:
+                log(f"Konnte im Systemkanal von {guild.name} keine Nachricht senden.")
 
 # Anti Invite Link
 @bot.event
