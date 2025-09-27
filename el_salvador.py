@@ -44,12 +44,15 @@ def log(*args):
     if VERBOSE:
         print("[LOG]", *args)
 
-# Whitelist + Blacklist (dynamisch)
-whitelist: set[int] = set()
-blacklist: set[int] = set()
+# Whitelist + Blacklist (pro Server)
+whitelists: dict[int, set[int]] = defaultdict(set)  # key = guild.id
+blacklists: dict[int, set[int]] = defaultdict(set)
 
 def is_whitelisted(member: discord.Member) -> bool:
-    return member and member.id in whitelist
+    return member and member.id in whitelists[member.guild.id]
+
+def is_blacklisted(member: discord.Member) -> bool:
+    return member and member.id in blacklists[member.guild.id]
 
 def is_bot_admin(ctx: commands.Context) -> bool:
     """Nur Server-Owner oder BOT_ADMIN_ID darf sensible Commands ausführen"""
@@ -116,13 +119,11 @@ async def on_ready():
     except Exception as e:
         log(f"Fehler beim Synchronisieren der Commands: {e}")
 
-    # Präsenz immer setzen, egal ob Sync erfolgreich war
     await bot.change_presence(
         status=discord.Status.online,
         activity=discord.Game("Bereit zum Beschützen!")
     )
 
-    # Nachricht an alle Server-Owner oder Moderator-Kanal
     for guild in bot.guilds:
         message_text = (
             "🌐**__Erneuerung der Whitelist und Blacklist__**🌐\n"
@@ -131,16 +132,14 @@ async def on_ready():
             "`Sie werden in ca. 1 Monat erneut eine DM bekommen mit der gleichen Nachricht bitte haben Sie Verständnis`"
         )
 
-        # 1. DM an Owner versuchen
         try:
             if guild.owner:
                 await guild.owner.send(message_text)
                 log(f"DM an {guild.owner} gesendet ({guild.name}).")
-                continue  # DM erfolgreich → keine Nachricht im Server nötig
+                continue
         except discord.Forbidden:
             log(f"Konnte {guild.owner} keine DM senden ({guild.name}).")
 
-        # 2. Kanal "moderator-only" suchen
         mod_channel = discord.utils.get(guild.text_channels, name="moderator-only")
         if mod_channel and mod_channel.permissions_for(guild.me).send_messages:
             try:
@@ -150,7 +149,6 @@ async def on_ready():
             except discord.Forbidden:
                 log(f"Konnte in #{mod_channel.name} von {guild.name} keine Nachricht senden.")
 
-        # 3. Fallback: Systemkanal nutzen
         if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
             try:
                 await guild.system_channel.send(message_text)
@@ -238,8 +236,7 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 async def on_member_join(member: discord.Member):
     guild = member.guild
 
-    # Blacklist: sofort kicken
-    if member.id in blacklist:
+    if member.id in blacklists[guild.id]:
         await kick_member(guild, member, "User ist auf der Blacklist")
         return
 
@@ -259,53 +256,54 @@ async def on_member_join(member: discord.Member):
 async def add_whitelist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    whitelist.add(user.id)
-    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde zur Whitelist hinzugefügt.")
+    whitelists[ctx.guild.id].add(user.id)
+    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** zur Whitelist hinzugefügt.")
 
 @bot.hybrid_command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
 async def remove_whitelist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    whitelist.discard(user.id)
-    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde von der Whitelist entfernt.")
+    whitelists[ctx.guild.id].discard(user.id)
+    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** von der Whitelist entfernt.")
 
 @bot.hybrid_command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
 async def show_whitelist(ctx: commands.Context):
-    if not whitelist:
+    users = whitelists[ctx.guild.id]
+    if not users:
         return await ctx.reply("ℹ️ Whitelist ist leer.")
-    users = []
-    for uid in whitelist:
+    resolved = []
+    for uid in users:
         user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-        users.append(user.name if user else str(uid))
-    await ctx.reply("📜 Whitelist:\n" + "\n".join(users))
+        resolved.append(user.mention if user else str(uid))
+    await ctx.reply("📜 Whitelist:\n" + "\n".join(resolved))
 
 @bot.hybrid_command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
 async def add_blacklist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    blacklist.add(user.id)
-    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde zur Blacklist hinzugefügt.")
+    blacklists[ctx.guild.id].add(user.id)
+    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** zur Blacklist hinzugefügt.")
 
 @bot.hybrid_command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
 async def remove_blacklist(ctx: commands.Context, user: discord.User):
     if not is_bot_admin(ctx):
         return await ctx.reply("❌ Keine Berechtigung.")
-    blacklist.discard(user.id)
-    await ctx.reply(f"✅ User `{user}` (`{user.id}`) wurde von der Blacklist entfernt.")
+    blacklists[ctx.guild.id].discard(user.id)
+    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** von der Blacklist entfernt.")
 
 @bot.hybrid_command(name="showblacklist", description="Zeigt alle User in der Blacklist")
 async def show_blacklist(ctx: commands.Context):
-    if not blacklist:
+    users = blacklists[ctx.guild.id]
+    if not users:
         return await ctx.reply("ℹ️ Blacklist ist leer.")
-    users = []
-    for uid in blacklist:
+    resolved = []
+    for uid in users:
         user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-        users.append(user.name if user else str(uid))
-    await ctx.reply("🚫 Blacklist:\n" + "\n".join(users))
+        resolved.append(user.mention if user else str(uid))
+    await ctx.reply("🚫 Blacklist:\n" + "\n".join(resolved))
 
 # ---------- Start ----------
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
