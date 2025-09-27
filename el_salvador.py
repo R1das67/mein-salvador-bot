@@ -274,7 +274,7 @@ async def show_whitelist(ctx: commands.Context):
     resolved = []
     for uid in users:
         user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-        resolved.append(user.mention if user else str(uid))
+        resolved.append(user.name if user else str(uid))
     await ctx.reply("📜 Whitelist:\n" + "\n".join(resolved))
 
 @bot.hybrid_command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
@@ -299,7 +299,7 @@ async def show_blacklist(ctx: commands.Context):
     resolved = []
     for uid in users:
         user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-        resolved.append(user.mention if user else str(uid))
+        resolved.append(user.name if user else str(uid))
     await ctx.reply("🚫 Blacklist:\n" + "\n".join(resolved))
 
 # ---------- Start ----------
@@ -307,3 +307,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
