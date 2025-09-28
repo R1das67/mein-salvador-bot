@@ -201,10 +201,14 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 @bot.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
+
+    # Blacklist Check
     if member.id in blacklists[guild.id]:
         await kick_member(guild, member, "User ist auf der Blacklist")
         return
-        if not member.bot:
+
+    # Normale User ignorieren
+    if not member.bot:
         return  # Normale User werden hier nicht weiter überprüft
 
     # Prüfen, wer den Bot eingeladen hat
@@ -272,4 +276,5 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
 
