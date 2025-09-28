@@ -19,13 +19,11 @@ log = logging.getLogger("GlobexSecurity")
 
 # ---------- Konfiguration ----------
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
-
 BOT_ADMIN_ID = 843180408152784936
 
 INVITE_SPAM_WINDOW_SECONDS = 20
 INVITE_SPAM_THRESHOLD = 5
 INVITE_TIMEOUT_HOURS = 1
-
 WEBHOOK_STRIKES_BEFORE_KICK = 3
 
 # ---------- Bot & Intents ----------
@@ -47,25 +45,20 @@ INVITE_REGEX = re.compile(
 whitelists: dict[int, set[int]] = defaultdict(set)
 blacklists: dict[int, set[int]] = defaultdict(set)
 
-
 def is_whitelisted(member: discord.Member) -> bool:
     return member and member.id in whitelists[member.guild.id]
-
 
 def is_blacklisted(member: discord.Member) -> bool:
     return member and member.id in blacklists[member.guild.id]
 
-
 def is_bot_admin(ctx: commands.Context) -> bool:
     return ctx.author.id == BOT_ADMIN_ID or (ctx.guild and ctx.author.id == ctx.guild.owner_id)
-
 
 async def safe_delete_message(msg: discord.Message):
     try:
         await msg.delete()
     except (NotFound, Forbidden):
         pass
-
 
 async def kick_member(guild: discord.Guild, member: discord.Member, reason: str):
     if not member or is_whitelisted(member):
@@ -79,7 +72,6 @@ async def kick_member(guild: discord.Guild, member: discord.Member, reason: str)
     except (Forbidden, HTTPException) as e:
         log.error(f"Kick failed for {member}: {e}")
 
-
 async def ban_member(guild: discord.Guild, member: discord.Member, reason: str, delete_days: int = 0):
     if not member or is_whitelisted(member):
         return
@@ -91,7 +83,6 @@ async def ban_member(guild: discord.Guild, member: discord.Member, reason: str, 
         log.info(f"Banned {member} | Reason: {reason}")
     except (Forbidden, HTTPException) as e:
         log.error(f"Ban failed for {member}: {e}")
-
 
 async def timeout_member(member: discord.Member, hours: int, reason: str):
     if not member or is_whitelisted(member):
@@ -105,7 +96,6 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
         log.info(f"Timed out {member} until {until} | Reason: {reason}")
     except (Forbidden, HTTPException) as e:
         log.error(f"Timeout failed for {member}: {e}")
-
 
 async def actor_from_audit_log(
     guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10
@@ -123,7 +113,6 @@ async def actor_from_audit_log(
         log.warning("Keine Berechtigung, Audit-Logs zu lesen.")
     return None
 
-
 # ---------- In-Memory Tracker ----------
 invite_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=50))
 webhook_strikes: defaultdict[int, int] = defaultdict(int)
@@ -140,8 +129,6 @@ async def on_ready():
 
     await bot.change_presence(status=discord.Status.online, activity=discord.Game("Bereit zum Beschützen!"))
 
-
-# ---------- Anti Invite Link ----------
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -162,8 +149,6 @@ async def on_message(message: discord.Message):
                 invite_timestamps[message.author.id].clear()
     await bot.process_commands(message)
 
-
-# ---------- Angepasster Anti Webhook ----------
 @bot.event
 async def on_webhooks_update(channel: discord.abc.GuildChannel):
     guild = channel.guild
@@ -175,7 +160,6 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
         hooks = []
 
     for hook in hooks:
-        # nur neue Webhooks löschen (erstellt nach Bot-Start)
         if (datetime.now(timezone.utc) - hook.created_at).total_seconds() <= 60:
             member = guild.get_member(hook.user.id) if hook.user else None
             if member and is_whitelisted(member):
@@ -192,6 +176,62 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
             await kick_member(guild, actor, "Zu viele Webhook-Erstellungen")
             webhook_strikes[actor.id] = 0
 
+# ---------- Slash Commands ----------
+@bot.tree.command(name="whitelist_add", description="Fügt einen User zur Whitelist hinzu")
+async def whitelist_add(interaction: discord.Interaction, user: discord.Member):
+    if interaction.user.id != BOT_ADMIN_ID:
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    whitelists[interaction.guild.id].add(user.id)
+    await interaction.response.send_message(f"{user.mention} zur Whitelist hinzugefügt.")
+
+@bot.tree.command(name="whitelist_remove", description="Entfernt einen User von der Whitelist")
+async def whitelist_remove(interaction: discord.Interaction, user: discord.Member):
+    if interaction.user.id != BOT_ADMIN_ID:
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    whitelists[interaction.guild.id].discard(user.id)
+    await interaction.response.send_message(f"{user.mention} von der Whitelist entfernt.")
+
+@bot.tree.command(name="blacklist_add", description="Fügt einen User zur Blacklist hinzu")
+async def blacklist_add(interaction: discord.Interaction, user: discord.Member):
+    if interaction.user.id != BOT_ADMIN_ID:
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    blacklists[interaction.guild.id].add(user.id)
+    await interaction.response.send_message(f"{user.mention} zur Blacklist hinzugefügt.")
+
+@bot.tree.command(name="blacklist_remove", description="Entfernt einen User von der Blacklist")
+async def blacklist_remove(interaction: discord.Interaction, user: discord.Member):
+    if interaction.user.id != BOT_ADMIN_ID:
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    blacklists[interaction.guild.id].discard(user.id)
+    await interaction.response.send_message(f"{user.mention} von der Blacklist entfernt.")
+
+@bot.tree.command(name="kick", description="Kickt einen User vom Server")
+async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = "Keine Angabe"):
+    if not is_bot_admin(interaction):
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    await kick_member(interaction.guild, user, reason)
+    await interaction.response.send_message(f"{user.mention} wurde gekickt. Grund: {reason}")
+
+@bot.tree.command(name="ban", description="Bannt einen User vom Server")
+async def ban_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = "Keine Angabe"):
+    if not is_bot_admin(interaction):
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    await ban_member(interaction.guild, user, reason)
+    await interaction.response.send_message(f"{user.mention} wurde gebannt. Grund: {reason}")
+
+@bot.tree.command(name="timeout", description="Timeout für einen User setzen")
+async def timeout_cmd(interaction: discord.Interaction, user: discord.Member, stunden: int):
+    if not is_bot_admin(interaction):
+        await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
+        return
+    await timeout_member(user, stunden, f"Timeout durch {interaction.user}")
+    await interaction.response.send_message(f"{user.mention} wurde für {stunden} Stunden getimeoutet.")
 
 # ---------- Start ----------
 if __name__ == "__main__":
