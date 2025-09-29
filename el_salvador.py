@@ -112,14 +112,18 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
 @bot.event
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
-    for guild in bot.guilds:
-        # Store existing webhooks to not delete them later
-        try:
-            hooks = await guild.webhooks()
-            existing_webhooks[guild.id] = {h.id for h in hooks}
-        except:
-            existing_webhooks[guild.id] = set()
-    await bot.change_presence(status=discord.Status.online, activity=discord.Game("Bereit zum Beschützen!"))
+
+    # Guild-spezifisches Sync (schneller sichtbar!)
+    TEST_GUILD_ID = 1416506382013960363  # Deine Guild-ID hier eintragen
+    guild = discord.Object(id=TEST_GUILD_ID)
+    await bot.tree.sync(guild=guild)
+
+    log("Slash Commands für Test-Guild synchronisiert ✅")
+
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Game("Bereit zum Beschützen!")
+    )
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -276,5 +280,3 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
-
