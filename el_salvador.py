@@ -113,12 +113,13 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
 
-    # Guild-spezifisches Sync (schneller sichtbar!)
-    TEST_GUILD_ID = 1416506382013960363  # Deine Guild-ID hier eintragen
-    guild = discord.Object(id=TEST_GUILD_ID)
-    await bot.tree.sync(guild=guild)
+    # 🔄 Alle globalen Commands löschen (wichtig, sonst bleiben alte erhalten)
+    bot.tree.clear_commands(guild=None)
 
-    log("Slash Commands für Test-Guild synchronisiert ✅")
+    # 🔄 Neue global syncen
+    await bot.tree.sync()
+
+    log("Globale Slash Commands neu synchronisiert ✅")
 
     await bot.change_presence(
         status=discord.Status.online,
@@ -280,3 +281,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
