@@ -100,7 +100,7 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
         log(f"Timeout failed for {member}: {e}")
 
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
-    await asyncio.sleep(2)
+    await asyncio.sleep(0.5)  # <--- Sleep verkürzt von 2s auf 0.5s für schnellere Reaktion
     try:
         now = datetime.now(timezone.utc)
         async for entry in guild.audit_logs(limit=15, action=action):
