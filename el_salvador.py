@@ -38,13 +38,12 @@ INVITE_REGEX = re.compile(
     re.IGNORECASE,
 )
 
-whitelists: dict[int, set[int]] = defaultdict(set)  # key = guild.id
+whitelists: dict[int, set[int]] = defaultdict(set)
 blacklists: dict[int, set[int]] = defaultdict(set)
 
 invite_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=50))
 webhook_strikes: defaultdict[int, int] = defaultdict(int)
 
-# Store existing webhooks to know which ones existed before bot start
 existing_webhooks: dict[int, set[int]] = defaultdict(set)
 
 def log(*args):
@@ -54,34 +53,46 @@ def log(*args):
 async def safe_delete_message(msg: discord.Message):
     try:
         await msg.delete()
-    except (NotFound, Forbidden):
+    except (NotFound, Forbidden, HTTPException):
         pass
 
-def is_whitelisted(member: discord.Member) -> bool:
-    return member and member.id in whitelists[member.guild.id]
+def is_whitelisted(member: discord.abc.User | discord.Member) -> bool:
+    try:
+        gid = getattr(member.guild, "id", None)
+        if gid is None:
+            return False
+        return member.id in whitelists[gid]
+    except Exception:
+        return False
 
-def is_blacklisted(member: discord.Member) -> bool:
-    return member and member.id in blacklists[member.guild.id]
+def is_blacklisted(member: discord.abc.User | discord.Member) -> bool:
+    try:
+        gid = getattr(member.guild, "id", None)
+        if gid is None:
+            return False
+        return member.id in blacklists[gid]
+    except Exception:
+        return False
 
 def is_bot_admin(ctx: commands.Context) -> bool:
     return ctx.author.id == BOT_ADMIN_ID or (ctx.guild and ctx.author.id == ctx.guild.owner_id)
 
-async def kick_member(guild: discord.Guild, member: discord.Member, reason: str):
-    if not member or is_whitelisted(member):
+async def kick_member(guild: discord.Guild, member: discord.abc.User | discord.Member, reason: str):
+    if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
         return
     try:
-        await guild.kick(member, reason=reason)
+        await guild.kick(discord.Object(id=member.id), reason=reason)
         log(f"Kicked {member} | Reason: {reason}")
-    except (Forbidden, HTTPException) as e:
+    except (Forbidden, HTTPException, NotFound) as e:
         log(f"Kick failed for {member}: {e}")
 
-async def ban_member(guild: discord.Guild, member: discord.Member, reason: str, delete_days: int = 0):
-    if not member or is_whitelisted(member):
+async def ban_member(guild: discord.Guild, member: discord.abc.User | discord.Member, reason: str, delete_days: int = 0):
+    if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
         return
     try:
-        await guild.ban(member, reason=reason, delete_message_days=delete_days)
+        await guild.ban(discord.Object(id=member.id), reason=reason, delete_message_days=delete_days)
         log(f"Banned {member} | Reason: {reason}")
-    except (Forbidden, HTTPException) as e:
+    except (Forbidden, HTTPException, NotFound) as e:
         log(f"Ban failed for {member}: {e}")
 
 async def timeout_member(member: discord.Member, hours: int, reason: str):
@@ -91,11 +102,12 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
         until = datetime.now(timezone.utc) + timedelta(hours=hours)
         await member.edit(timed_out_until=until, reason=reason)
         log(f"Timed out {member} until {until} | Reason: {reason}")
-    except (Forbidden, HTTPException) as e:
+    except (Forbidden, HTTPException, NotFound) as e:
         log(f"Timeout failed for {member}: {e}")
 
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
-    await asyncio.sleep(1)  # Pause für Audit Log Konsistenz
+    # kleine Verzögerung, da Discord Audit-Logs leicht verzögert schreibt
+    await asyncio.sleep(2)
     try:
         now = datetime.now(timezone.utc)
         async for entry in guild.audit_logs(limit=15, action=action):
@@ -106,6 +118,10 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
             return entry.user
     except Forbidden:
         log("Keine Berechtigung, Audit-Logs zu lesen.")
+    except NotFound:
+        log(f"Audit Log Fehler: Guild {guild.id} nicht gefunden (wahrscheinlich gelöscht).")
+    except HTTPException as e:
+        log(f"Audit Log HTTP-Fehler: {e}")
     return None
 
 # ---------- Events ----------
@@ -113,10 +129,11 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
 
-    # Globales Sync (dauert bis zu 1h, aber für alle Server)
-    await bot.tree.sync()
-
-    log("Slash Commands global synchronisiert 🌍")
+    try:
+        await bot.tree.sync()
+        log("Slash Commands global synchronisiert 🌍")
+    except Exception as e:
+        log(f"Fehler beim Slash Command Sync: {e}")
 
     await bot.change_presence(
         status=discord.Status.online,
@@ -153,14 +170,14 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
         hooks = []
     for hook in hooks:
         if hook.id in existing_webhooks[guild.id]:
-            continue  # Ignoriere Webhooks, die schon vor Botstart existierten
+            continue
         member = guild.get_member(hook.user.id) if hook.user else None
         if member and is_whitelisted(member):
             continue
         try:
             await hook.delete(reason="Anti-Webhook aktiv")
             log(f"Webhook {hook.name} gelöscht in #{channel.name}")
-        except (Forbidden, HTTPException):
+        except (Forbidden, HTTPException, NotFound):
             pass
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         webhook_strikes[actor.id] += 1
@@ -168,14 +185,12 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
             await kick_member(guild, actor, "Zu viele Webhook-Erstellungen")
             webhook_strikes[actor.id] = 0
 
-# Anti Ban
 @bot.event
 async def on_member_ban(guild: discord.Guild, user: discord.User):
     actor = await actor_from_audit_log(guild, AuditLogAction.ban, target_id=user.id, within_seconds=20)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(guild, actor, f"Unzulässiges Bannen von {user}")
 
-# Anti Kick
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
@@ -183,7 +198,6 @@ async def on_member_remove(member: discord.Member):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(guild, actor, f"Unzulässiges Kicken von {member}")
 
-# Anti Role Delete
 @bot.event
 async def on_guild_role_delete(role: discord.Role):
     guild = role.guild
@@ -191,7 +205,6 @@ async def on_guild_role_delete(role: discord.Role):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(guild, actor, f"Löschen der Rolle '{role.name}'")
 
-# Anti Channel Delete
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     guild = channel.guild
@@ -199,21 +212,17 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(guild, actor, f"Löschen des Kanals '{channel.name}'")
 
-# Anti Bot Join & Blacklist Check
 @bot.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
 
-    # Blacklist Check
     if member.id in blacklists[guild.id]:
         await kick_member(guild, member, "User ist auf der Blacklist")
         return
 
-    # Normale User ignorieren
     if not member.bot:
-        return  # Normale User werden hier nicht weiter überprüft
+        return
 
-    # Prüfen, wer den Bot eingeladen hat
     inviter = await actor_from_audit_log(guild, AuditLogAction.bot_add, target_id=member.id, within_seconds=60)
     if isinstance(inviter, discord.Member):
         if not is_whitelisted(inviter):
@@ -221,6 +230,10 @@ async def on_member_join(member: discord.Member):
             await ban_member(guild, inviter, f"Anti Bot Join: {inviter} hat Bot eingeladen")
         else:
             log(f"Whitelisted inviter {inviter} hat Bot {member} eingeladen – kein Ban.")
+    elif inviter:
+        log(f"Inviter (User-Objekt) erkannt: {inviter} – keine Aktion ohne Member-Zugriff.")
+    else:
+        log(f"Kein Inviter gefunden für Bot {member}")
 
 # ---------- Commands ----------
 @bot.hybrid_command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
@@ -244,8 +257,11 @@ async def show_whitelist(ctx: commands.Context):
         return await ctx.reply("ℹ️ Whitelist ist leer.")
     resolved = []
     for uid in users:
-        user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-        resolved.append(user.name if user else str(uid))
+        try:
+            user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
+            resolved.append(user.name if user else str(uid))
+        except Exception:
+            resolved.append(str(uid))
     await ctx.reply("📜 Whitelist:\n" + "\n".join(resolved))
 
 @bot.hybrid_command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
@@ -269,8 +285,11 @@ async def show_blacklist(ctx: commands.Context):
         return await ctx.reply("ℹ️ Blacklist ist leer.")
     resolved = []
     for uid in users:
-        user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-        resolved.append(user.name if user else str(uid))
+        try:
+            user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
+            resolved.append(user.name if user else str(uid))
+        except Exception:
+            resolved.append(str(uid))
     await ctx.reply("🚫 Blacklist:\n" + "\n".join(resolved))
 
 # ---------- Start ----------
@@ -278,5 +297,3 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
-
