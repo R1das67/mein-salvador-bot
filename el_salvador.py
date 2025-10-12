@@ -56,28 +56,22 @@ async def safe_delete_message(msg: discord.Message):
     except (NotFound, Forbidden, HTTPException):
         pass
 
-def is_whitelisted(member: discord.abc.User | discord.Member) -> bool:
-    try:
-        gid = getattr(member.guild, "id", None)
-        if gid is None:
-            return False
-        return member.id in whitelists[gid]
-    except Exception:
+def is_whitelisted(member: discord.Member | discord.User) -> bool:
+    gid = getattr(getattr(member, "guild", None), "id", None)
+    if gid is None:
         return False
+    return member.id in whitelists[gid]
 
-def is_blacklisted(member: discord.abc.User | discord.Member) -> bool:
-    try:
-        gid = getattr(member.guild, "id", None)
-        if gid is None:
-            return False
-        return member.id in blacklists[gid]
-    except Exception:
+def is_blacklisted(member: discord.Member | discord.User) -> bool:
+    gid = getattr(getattr(member, "guild", None), "id", None)
+    if gid is None:
         return False
+    return member.id in blacklists[gid]
 
 def is_bot_admin(ctx: commands.Context) -> bool:
     return ctx.author.id == BOT_ADMIN_ID or (ctx.guild and ctx.author.id == ctx.guild.owner_id)
 
-async def kick_member(guild: discord.Guild, member: discord.abc.User | discord.Member, reason: str):
+async def kick_member(guild: discord.Guild, member: discord.Member | discord.User, reason: str):
     if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
         return
     try:
@@ -86,7 +80,7 @@ async def kick_member(guild: discord.Guild, member: discord.abc.User | discord.M
     except (Forbidden, HTTPException, NotFound) as e:
         log(f"Kick failed for {member}: {e}")
 
-async def ban_member(guild: discord.Guild, member: discord.abc.User | discord.Member, reason: str, delete_days: int = 0):
+async def ban_member(guild: discord.Guild, member: discord.Member | discord.User, reason: str, delete_days: int = 0):
     if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
         return
     try:
@@ -106,7 +100,6 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
         log(f"Timeout failed for {member}: {e}")
 
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
-    # kleine Verzögerung, da Discord Audit-Logs leicht verzögert schreibt
     await asyncio.sleep(2)
     try:
         now = datetime.now(timezone.utc)
@@ -128,13 +121,11 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
 @bot.event
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
-
     try:
         await bot.tree.sync()
         log("Slash Commands global synchronisiert 🌍")
     except Exception as e:
         log(f"Fehler beim Slash Command Sync: {e}")
-
     await bot.change_presence(
         status=discord.Status.online,
         activity=discord.Game("Bereit zum Beschützen!")
@@ -171,7 +162,7 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
     for hook in hooks:
         if hook.id in existing_webhooks[guild.id]:
             continue
-        member = guild.get_member(hook.user.id) if hook.user else None
+        member = guild.get_member(hook.user.id) if hook.user and isinstance(hook.user, discord.User) else None
         if member and is_whitelisted(member):
             continue
         try:
@@ -215,14 +206,11 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
 @bot.event
 async def on_member_join(member: discord.Member):
     guild = member.guild
-
     if member.id in blacklists[guild.id]:
         await kick_member(guild, member, "User ist auf der Blacklist")
         return
-
     if not member.bot:
         return
-
     inviter = await actor_from_audit_log(guild, AuditLogAction.bot_add, target_id=member.id, within_seconds=60)
     if isinstance(inviter, discord.Member):
         if not is_whitelisted(inviter):
