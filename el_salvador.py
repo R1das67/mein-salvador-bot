@@ -58,6 +58,7 @@ ban_kick_actions: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10)
 
 # Anti Mention Spam Speicher
 mention_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10))
+mention_messages: dict[int, deque[discord.Message]] = defaultdict(lambda: deque(maxlen=10))
 
 def log(*args):
     if VERBOSE:
@@ -196,16 +197,27 @@ async def on_message(message: discord.Message):
         if message.mention_everyone or any(role.mentionable for role in message.role_mentions):
             now_ts = asyncio.get_event_loop().time()
             dq = mention_timestamps[message.author.id]
+            msg_list = mention_messages[message.author.id]
             dq.append(now_ts)
+            msg_list.append(message)
+
+            # Alte Nachrichten aus dem Zeitfenster entfernen
             while dq and (now_ts - dq[0]) > MENTION_SPAM_WINDOW_SECONDS:
                 dq.popleft()
+                if msg_list:
+                    msg_list.popleft()
+
             if len(dq) >= MENTION_SPAM_THRESHOLD:
                 await kick_member(
                     message.guild,
                     message.author,
                     f"Massenping-Spam: {len(dq)} @everyone/@here/@Role Erwähnungen in kurzer Zeit"
                 )
+                # Nach Kick alle Ping-Nachrichten löschen
+                for msg in list(msg_list):
+                    await safe_delete_message(msg)
                 mention_timestamps[message.author.id].clear()
+                mention_messages[message.author.id].clear()
 
     await bot.process_commands(message)
 
