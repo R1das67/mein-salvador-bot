@@ -24,6 +24,10 @@ WEBHOOK_STRIKES_BEFORE_KICK = 3
 ANTI_BAN_KICK_WINDOW_SECONDS = 15
 ANTI_BAN_KICK_THRESHOLD = 3
 
+# Anti Mention Spam Settings
+MENTION_SPAM_WINDOW_SECONDS = 15
+MENTION_SPAM_THRESHOLD = 3
+
 VERBOSE = True
 
 # ---------- Bot & Intents ----------
@@ -51,6 +55,9 @@ existing_webhooks: dict[int, set[int]] = defaultdict(set)
 
 # Anti Ban/Kick Spamm Speicher
 ban_kick_actions: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10))
+
+# Anti Mention Spam Speicher
+mention_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10))
 
 def log(*args):
     if VERBOSE:
@@ -162,11 +169,13 @@ async def on_member_remove(member: discord.Member):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await track_ban_kick(actor, "kick")
 
-# ---------- Anti Webhook / Anti Invite / Sonstiges ----------
+# ---------- Anti Webhook / Anti Invite / Anti Mention Spam ----------
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
+
+    # --- Anti Invite Spam ---
     if INVITE_REGEX.search(message.content):
         if not is_whitelisted(message.author):
             await safe_delete_message(message)
@@ -181,6 +190,23 @@ async def on_message(message: discord.Message):
                 else:
                     await timeout_member(message.author, INVITE_TIMEOUT_HOURS, "Invite-Link-Spam")
                 invite_timestamps[message.author.id].clear()
+
+    # --- Anti Mention Spam ---
+    if not is_whitelisted(message.author):
+        if message.mention_everyone or any(role.mentionable for role in message.role_mentions):
+            now_ts = asyncio.get_event_loop().time()
+            dq = mention_timestamps[message.author.id]
+            dq.append(now_ts)
+            while dq and (now_ts - dq[0]) > MENTION_SPAM_WINDOW_SECONDS:
+                dq.popleft()
+            if len(dq) >= MENTION_SPAM_THRESHOLD:
+                await kick_member(
+                    message.guild,
+                    message.author,
+                    f"Massenping-Spam: {len(dq)} @everyone/@here/@Role Erwähnungen in kurzer Zeit"
+                )
+                mention_timestamps[message.author.id].clear()
+
     await bot.process_commands(message)
 
 @bot.event
