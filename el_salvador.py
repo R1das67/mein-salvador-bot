@@ -1,4 +1,4 @@
-import os 
+import os
 import re
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -19,6 +19,10 @@ INVITE_TIMEOUT_HOURS = 1
 
 # Anti-Webhook Settings
 WEBHOOK_STRIKES_BEFORE_KICK = 3
+
+# Anti Ban/Kick Spamm Settings
+ANTI_BAN_KICK_WINDOW_SECONDS = 15
+ANTI_BAN_KICK_THRESHOLD = 3
 
 VERBOSE = True
 
@@ -43,8 +47,10 @@ blacklists: dict[int, set[int]] = defaultdict(set)
 
 invite_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=50))
 webhook_strikes: defaultdict[int, int] = defaultdict(int)
-
 existing_webhooks: dict[int, set[int]] = defaultdict(set)
+
+# Anti Ban/Kick Spamm Speicher
+ban_kick_actions: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10))
 
 def log(*args):
     if VERBOSE:
@@ -100,7 +106,7 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
         log(f"Timeout failed for {member}: {e}")
 
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
-    await asyncio.sleep(0.5)  # <--- Sleep verkürzt von 2s auf 0.5s für schnellere Reaktion
+    await asyncio.sleep(0.5)
     try:
         now = datetime.now(timezone.utc)
         async for entry in guild.audit_logs(limit=15, action=action):
@@ -112,7 +118,7 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
     except Forbidden:
         log("Keine Berechtigung, Audit-Logs zu lesen.")
     except NotFound:
-        log(f"Audit Log Fehler: Guild {guild.id} nicht gefunden (wahrscheinlich gelöscht).")
+        log(f"Audit Log Fehler: Guild {guild.id} nicht gefunden.")
     except HTTPException as e:
         log(f"Audit Log HTTP-Fehler: {e}")
     return None
@@ -131,6 +137,32 @@ async def on_ready():
         activity=discord.Game("Bereit zum Beschützen!")
     )
 
+# ---------- Anti Ban/Kick Spamm ----------
+async def track_ban_kick(actor: discord.Member, action_type: str):
+    now = asyncio.get_event_loop().time()
+    dq = ban_kick_actions[actor.id]
+    dq.append(now)
+    while dq and (now - dq[0]) > ANTI_BAN_KICK_WINDOW_SECONDS:
+        dq.popleft()
+    if len(dq) >= ANTI_BAN_KICK_THRESHOLD:
+        guild = actor.guild
+        await kick_member(guild, actor, f"Anti Ban/Kick Spamm: {len(dq)} Aktionen in kurzer Zeit")
+        ban_kick_actions[actor.id].clear()
+
+@bot.event
+async def on_member_ban(guild: discord.Guild, user: discord.User):
+    actor = await actor_from_audit_log(guild, AuditLogAction.ban, target_id=user.id, within_seconds=20)
+    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
+        await track_ban_kick(actor, "ban")
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    guild = member.guild
+    actor = await actor_from_audit_log(guild, AuditLogAction.kick, target_id=member.id, within_seconds=20)
+    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
+        await track_ban_kick(actor, "kick")
+
+# ---------- Anti Webhook / Anti Invite / Sonstiges ----------
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -175,53 +207,6 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
         if webhook_strikes[actor.id] >= WEBHOOK_STRIKES_BEFORE_KICK:
             await kick_member(guild, actor, "Zu viele Webhook-Erstellungen")
             webhook_strikes[actor.id] = 0
-
-@bot.event
-async def on_member_ban(guild: discord.Guild, user: discord.User):
-    actor = await actor_from_audit_log(guild, AuditLogAction.ban, target_id=user.id, within_seconds=20)
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        await kick_member(guild, actor, f"Unzulässiges Bannen von {user}")
-
-@bot.event
-async def on_member_remove(member: discord.Member):
-    guild = member.guild
-    actor = await actor_from_audit_log(guild, AuditLogAction.kick, target_id=member.id, within_seconds=20)
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        await kick_member(guild, actor, f"Unzulässiges Kicken von {member}")
-
-@bot.event
-async def on_guild_role_delete(role: discord.Role):
-    guild = role.guild
-    actor = await actor_from_audit_log(guild, AuditLogAction.role_delete, target_id=role.id, within_seconds=20)
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        await kick_member(guild, actor, f"Löschen der Rolle '{role.name}'")
-
-@bot.event
-async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
-    guild = channel.guild
-    actor = await actor_from_audit_log(guild, AuditLogAction.channel_delete, target_id=channel.id, within_seconds=20)
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        await kick_member(guild, actor, f"Löschen des Kanals '{channel.name}'")
-
-@bot.event
-async def on_member_join(member: discord.Member):
-    guild = member.guild
-    if member.id in blacklists[guild.id]:
-        await kick_member(guild, member, "User ist auf der Blacklist")
-        return
-    if not member.bot:
-        return
-    inviter = await actor_from_audit_log(guild, AuditLogAction.bot_add, target_id=member.id, within_seconds=60)
-    if isinstance(inviter, discord.Member):
-        if not is_whitelisted(inviter):
-            await ban_member(guild, member, "Anti Bot Join: Bot unerlaubt eingeladen")
-            await ban_member(guild, inviter, f"Anti Bot Join: {inviter} hat Bot eingeladen")
-        else:
-            log(f"Whitelisted inviter {inviter} hat Bot {member} eingeladen – kein Ban.")
-    elif inviter:
-        log(f"Inviter (User-Objekt) erkannt: {inviter} – keine Aktion ohne Member-Zugriff.")
-    else:
-        log(f"Kein Inviter gefunden für Bot {member}")
 
 # ---------- Commands ----------
 @bot.hybrid_command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
