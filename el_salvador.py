@@ -79,7 +79,13 @@ def is_whitelisted(member: discord.Member | discord.User) -> bool:
         return False
     return member.id in whitelists[gid]
 
-> bool:
+def is_blacklisted(member: discord.Member | discord.User) -> bool:
+    gid = getattr(getattr(member, "guild", None), "id", None)
+    if gid is None:
+        return False
+    return member.id in blacklists[gid]
+
+def is_bot_admin(ctx: commands.Context) -> bool:
     return ctx.author.id == BOT_ADMIN_ID or (ctx.guild and ctx.author.id == ctx.guild.owner_id)
 
 async def kick_member(guild: discord.Guild, member: discord.Member | discord.User, reason: str):
@@ -336,4 +342,3 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
