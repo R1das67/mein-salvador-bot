@@ -13,7 +13,7 @@ TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 BOT_ADMIN_ID = 843180408152784936
 
 # Invite-Settings
-INVITE_SPAM_WINDOW_SECONDS = 20
+INVITE_SPAM_WINDOW_SECONDS = 30
 INVITE_SPAM_THRESHOLD = 5
 INVITE_TIMEOUT_HOURS = 1
 
@@ -21,7 +21,7 @@ INVITE_TIMEOUT_HOURS = 1
 WEBHOOK_STRIKES_BEFORE_KICK = 3
 
 # Anti Ban/Kick Spamm Settings
-ANTI_BAN_KICK_WINDOW_SECONDS = 15
+ANTI_BAN_KICK_WINDOW_SECONDS = 30
 ANTI_BAN_KICK_THRESHOLD = 3
 
 # Anti Mention Spam Settings
@@ -37,6 +37,9 @@ intents.guilds = True
 intents.members = True
 intents.bans = True
 intents.presences = True
+intents.webhooks = True
+intents.guild_messages = True
+intents.guild_reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -88,6 +91,8 @@ def is_bot_admin(ctx: commands.Context) -> bool:
 async def kick_member(guild: discord.Guild, member: discord.Member | discord.User, reason: str):
     if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
         return
+    if member.id == bot.user.id:
+        return
     try:
         await guild.kick(discord.Object(id=member.id), reason=reason)
         log(f"Kicked {member} | Reason: {reason}")
@@ -97,6 +102,8 @@ async def kick_member(guild: discord.Guild, member: discord.Member | discord.Use
 async def ban_member(guild: discord.Guild, member: discord.Member | discord.User, reason: str, delete_days: int = 0):
     if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
         return
+    if member.id == bot.user.id:
+        return
     try:
         await guild.ban(discord.Object(id=member.id), reason=reason, delete_message_days=delete_days)
         log(f"Banned {member} | Reason: {reason}")
@@ -105,6 +112,8 @@ async def ban_member(guild: discord.Guild, member: discord.Member | discord.User
 
 async def timeout_member(member: discord.Member, hours: int, reason: str):
     if not member or is_whitelisted(member):
+        return
+    if member.id == bot.user.id:
         return
     try:
         until = datetime.now(timezone.utc) + timedelta(hours=hours)
@@ -159,14 +168,14 @@ async def track_ban_kick(actor: discord.Member, action_type: str):
 
 @bot.event
 async def on_member_ban(guild: discord.Guild, user: discord.User):
-    actor = await actor_from_audit_log(guild, AuditLogAction.ban, target_id=user.id, within_seconds=20)
+    actor = await actor_from_audit_log(guild, AuditLogAction.ban, target_id=user.id, within_seconds=30)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await track_ban_kick(actor, "ban")
 
 @bot.event
 async def on_member_remove(member: discord.Member):
     guild = member.guild
-    actor = await actor_from_audit_log(guild, AuditLogAction.kick, target_id=member.id, within_seconds=20)
+    actor = await actor_from_audit_log(guild, AuditLogAction.kick, target_id=member.id, within_seconds=30)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await track_ban_kick(actor, "kick")
 
@@ -186,10 +195,7 @@ async def on_message(message: discord.Message):
             while dq and (now_ts - dq[0]) > INVITE_SPAM_WINDOW_SECONDS:
                 dq.popleft()
             if len(dq) >= INVITE_SPAM_THRESHOLD:
-                if isinstance(message.author, discord.Member) and message.author.guild_permissions.administrator:
-                    await kick_member(message.guild, message.author, "Invite-Link-Spam (Admin)")
-                else:
-                    await timeout_member(message.author, INVITE_TIMEOUT_HOURS, "Invite-Link-Spam")
+                await kick_member(message.guild, message.author, "Invite-Link-Spam (Kick nach 5 Links in 30s)")
                 invite_timestamps[message.author.id].clear()
 
     # --- Anti Mention Spam ---
@@ -201,7 +207,6 @@ async def on_message(message: discord.Message):
             dq.append(now_ts)
             msg_list.append(message)
 
-            # Alte Nachrichten aus dem Zeitfenster entfernen
             while dq and (now_ts - dq[0]) > MENTION_SPAM_WINDOW_SECONDS:
                 dq.popleft()
                 if msg_list:
@@ -213,7 +218,6 @@ async def on_message(message: discord.Message):
                     message.author,
                     f"Massenping-Spam: {len(dq)} @everyone/@here/@Role Erwähnungen in kurzer Zeit"
                 )
-                # Nach Kick alle Ping-Nachrichten löschen
                 for msg in list(msg_list):
                     await safe_delete_message(msg)
                 mention_timestamps[message.author.id].clear()
@@ -232,6 +236,7 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
     for hook in hooks:
         if hook.id in existing_webhooks[guild.id]:
             continue
+        existing_webhooks[guild.id].add(hook.id)
         member = guild.get_member(hook.user.id) if hook.user and isinstance(hook.user, discord.User) else None
         if member and is_whitelisted(member):
             continue
@@ -243,8 +248,37 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         webhook_strikes[actor.id] += 1
         if webhook_strikes[actor.id] >= WEBHOOK_STRIKES_BEFORE_KICK:
-            await kick_member(guild, actor, "Zu viele Webhook-Erstellungen")
+            await kick_member(guild, actor, "Zu viele Webhook-Erstellungen (3)")
             webhook_strikes[actor.id] = 0
+
+# ---------- Anti Bot Join ----------
+@bot.event
+async def on_member_join(member: discord.Member):
+    if member.bot:
+        inviter = None
+        try:
+            async for entry in member.guild.audit_logs(limit=10, action=AuditLogAction.bot_add):
+                if entry.target.id == member.id:
+                    inviter = entry.user
+                    break
+        except Exception:
+            pass
+        if inviter and not is_whitelisted(inviter):
+            await kick_member(member.guild, member, "Bot wurde von nicht-whitelisted User eingeladen")
+            await kick_member(member.guild, inviter, "Bot eingeladen ohne Whitelist-Berechtigung")
+
+# ---------- Anti Role/Channel Delete ----------
+@bot.event
+async def on_guild_channel_delete(channel):
+    actor = await actor_from_audit_log(channel.guild, AuditLogAction.channel_delete, within_seconds=10)
+    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
+        await kick_member(channel.guild, actor, "Rolle/Kanal gelöscht ohne Berechtigung")
+
+@bot.event
+async def on_guild_role_delete(role):
+    actor = await actor_from_audit_log(role.guild, AuditLogAction.role_delete, within_seconds=10)
+    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
+        await kick_member(role.guild, actor, "Rolle/Kanal gelöscht ohne Berechtigung")
 
 # ---------- Commands ----------
 @bot.hybrid_command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
