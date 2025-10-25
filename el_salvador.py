@@ -82,8 +82,8 @@ def is_blacklisted(member: discord.Member | discord.User) -> bool:
         return False
     return member.id in blacklists[gid]
 
-def is_bot_admin(ctx: commands.Context) -> bool:
-    return ctx.author.id == BOT_ADMIN_ID or (ctx.guild and ctx.author.id == ctx.guild.owner_id)
+def is_bot_admin(interaction: discord.Interaction) -> bool:
+    return interaction.user.id == BOT_ADMIN_ID or (interaction.guild and interaction.user.id == interaction.guild.owner_id)
 
 async def kick_member(guild: discord.Guild, member: discord.Member | discord.User, reason: str):
     if not member or (isinstance(member, discord.Member) and is_whitelisted(member)):
@@ -140,14 +140,14 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
 
 # ---------- Nachricht an Eigentümer nach Neustart ----------
 async def notify_owner_after_restart():
-    await asyncio.sleep(3)  # kurz warten bis Bot vollständig bereit ist
+    await asyncio.sleep(3)
     message_text = (
         "**__🌐 Globex Security 🌐__**\n"
         "**@User**, lieber Eigentümer des Servers **(servername)**,\n"
-        "aufgrund dessen, dass mein Besitzer regelmäßig einen neuen Free-Plan bei einem Hosting-Anbieter beantragen muss, "
+        "aufgrund dessen, dass mein Besitzer regelmäßig einen neuen Free-Plan bei einer Hosting-Website beantragen muss, "
         "wurde ich neu gestartet.\n"
-        "Dabei werden leider alle Einträge der Whitelist und Blacklist zurückgesetzt.\n"
-        "Daher möchten wir Sie bitten, Ihre Whitelist und Blacklist erneut einzurichten.\n\n"
+        "Dabei werden leider die Nutzer in der Whitelist und Blacklist gelöscht.\n"
+        "Bitte stelle daher deine Whitelist und Blacklist erneut ein.\n\n"
         "**Mit freundlichen Grüßen,**\n"
         "**__Globex Security__**"
     )
@@ -174,11 +174,6 @@ async def notify_owner_after_restart():
 @bot.event
 async def on_ready():
     log(f"Bot online als {bot.user} (ID: {bot.user.id})")
-    try:
-        await bot.tree.sync()
-        log("Slash Commands global synchronisiert 🌍")
-    except Exception as e:
-        log(f"Fehler beim Slash Command Sync: {e}")
     await bot.change_presence(
         status=discord.Status.online,
         activity=discord.Game("Bereit zum Beschützen!")
@@ -186,6 +181,14 @@ async def on_ready():
 
     # Nachricht an Eigentümer nach Neustart
     asyncio.create_task(notify_owner_after_restart())
+
+    # Globale Synchronisierung aller Slash Commands
+    try:
+        await bot.tree.sync()
+        log("Alle Slash Commands global synchronisiert ✅")
+    except Exception as e:
+        log(f"Fehler beim globalen Slash Command Sync: {e}")
+
 
 # ---------- Anti Ban/Kick Spamm ----------
 async def track_ban_kick(actor: discord.Member, action_type: str):
@@ -211,6 +214,7 @@ async def on_member_remove(member: discord.Member):
     actor = await actor_from_audit_log(guild, AuditLogAction.kick, target_id=member.id, within_seconds=30)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await track_ban_kick(actor, "kick")
+
 
 # ---------- Anti Webhook / Anti Invite / Anti Mention Spam ----------
 @bot.event
@@ -257,6 +261,65 @@ async def on_message(message: discord.Message):
                 mention_messages[message.author.id].clear()
 
     await bot.process_commands(message)
+
+
+# ---------- Slash Commands ----------
+@bot.tree.command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
+async def add_whitelist(interaction: discord.Interaction, user: discord.User):
+    if not is_bot_admin(interaction):
+        return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+    whitelists[interaction.guild.id].add(user.id)
+    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** zur Whitelist hinzugefügt.", ephemeral=True)
+
+@bot.tree.command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
+async def remove_whitelist(interaction: discord.Interaction, user: discord.User):
+    if not is_bot_admin(interaction):
+        return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+    whitelists[interaction.guild.id].discard(user.id)
+    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** von der Whitelist entfernt.", ephemeral=True)
+
+@bot.tree.command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
+async def show_whitelist(interaction: discord.Interaction):
+    users = whitelists[interaction.guild.id]
+    if not users:
+        return await interaction.response.send_message("ℹ️ Whitelist ist leer.", ephemeral=True)
+    resolved = []
+    for uid in users:
+        try:
+            user = interaction.guild.get_member(uid) or await bot.fetch_user(uid)
+            resolved.append(user.name if user else str(uid))
+        except Exception:
+            resolved.append(str(uid))
+    await interaction.response.send_message("📜 Whitelist:\n" + "\n".join(resolved), ephemeral=True)
+
+@bot.tree.command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
+async def add_blacklist(interaction: discord.Interaction, user: discord.User):
+    if not is_bot_admin(interaction):
+        return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+    blacklists[interaction.guild.id].add(user.id)
+    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** zur Blacklist hinzugefügt.", ephemeral=True)
+
+@bot.tree.command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
+async def remove_blacklist(interaction: discord.Interaction, user: discord.User):
+    if not is_bot_admin(interaction):
+        return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
+    blacklists[interaction.guild.id].discard(user.id)
+    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** von der Blacklist entfernt.", ephemeral=True)
+
+@bot.tree.command(name="showblacklist", description="Zeigt alle User in der Blacklist")
+async def show_blacklist(interaction: discord.Interaction):
+    users = blacklists[interaction.guild.id]
+    if not users:
+        return await interaction.response.send_message("ℹ️ Blacklist ist leer.", ephemeral=True)
+    resolved = []
+    for uid in users:
+        try:
+            user = interaction.guild.get_member(uid) or await bot.fetch_user(uid)
+            resolved.append(user.name if user else str(uid))
+        except Exception:
+            resolved.append(str(uid))
+    await interaction.response.send_message("🚫 Blacklist:\n" + "\n".join(resolved), ephemeral=True)
+
 
 # ---------- Start ----------
 if __name__ == "__main__":
