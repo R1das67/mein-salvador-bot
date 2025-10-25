@@ -56,10 +56,7 @@ invite_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=50
 webhook_strikes: defaultdict[int, int] = defaultdict(int)
 existing_webhooks: dict[int, set[int]] = defaultdict(set)
 
-# Anti Ban/Kick Spamm Speicher
 ban_kick_actions: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10))
-
-# Anti Mention Spam Speicher
 mention_timestamps: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=10))
 mention_messages: dict[int, deque[discord.Message]] = defaultdict(lambda: deque(maxlen=10))
 
@@ -140,6 +137,39 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
         log(f"Audit Log HTTP-Fehler: {e}")
     return None
 
+
+# ---------- Nachricht an Eigentümer nach Neustart ----------
+async def notify_owner_after_restart():
+    await asyncio.sleep(3)  # kurz warten bis Bot vollständig bereit ist
+    message_text = (
+        "**__🌐 Globex Security 🌐__**\n"
+        "**@User**, lieber Eigentümer des Servers **(servername)**,\n"
+        "aufgrund dessen, dass mein Besitzer regelmäßig einen neuen Free-Plan bei einem Hosting-Anbieter beantragen muss, "
+        "wurde ich neu gestartet.\n"
+        "Dabei werden leider alle Einträge der Whitelist und Blacklist zurückgesetzt.\n"
+        "Daher möchten wir Sie bitten, Ihre Whitelist und Blacklist erneut einzurichten.\n\n"
+        "**Mit freundlichen Grüßen,**\n"
+        "**__Globex Security__**"
+    )
+
+    for guild in bot.guilds:
+        try:
+            owner = guild.owner or await bot.fetch_user(guild.owner_id)
+            if owner:
+                try:
+                    await owner.send(message_text.replace("@User", owner.mention).replace("(servername)", guild.name))
+                    log(f"Neustart-Nachricht an {owner} per DM gesendet ({guild.name})")
+                except (Forbidden, HTTPException):
+                    channel = discord.utils.get(guild.text_channels, name="moderator-only")
+                    if channel:
+                        await channel.send(message_text.replace("@User", owner.mention).replace("(servername)", guild.name))
+                        log(f"Neustart-Nachricht an #{channel.name} in {guild.name} gesendet")
+                    else:
+                        log(f"Kein 'moderator-only'-Kanal in {guild.name} gefunden.")
+        except Exception as e:
+            log(f"Fehler beim Benachrichtigen des Eigentümers in {guild.name}: {e}")
+
+
 # ---------- Events ----------
 @bot.event
 async def on_ready():
@@ -153,6 +183,9 @@ async def on_ready():
         status=discord.Status.online,
         activity=discord.Game("Bereit zum Beschützen!")
     )
+
+    # Nachricht an Eigentümer nach Neustart
+    asyncio.create_task(notify_owner_after_restart())
 
 # ---------- Anti Ban/Kick Spamm ----------
 async def track_ban_kick(actor: discord.Member, action_type: str):
@@ -224,118 +257,6 @@ async def on_message(message: discord.Message):
                 mention_messages[message.author.id].clear()
 
     await bot.process_commands(message)
-
-@bot.event
-async def on_webhooks_update(channel: discord.abc.GuildChannel):
-    guild = channel.guild
-    actor = await actor_from_audit_log(guild, AuditLogAction.webhook_create, within_seconds=30)
-    try:
-        hooks = await channel.webhooks()
-    except (Forbidden, HTTPException):
-        hooks = []
-    for hook in hooks:
-        if hook.id in existing_webhooks[guild.id]:
-            continue
-        existing_webhooks[guild.id].add(hook.id)
-        member = guild.get_member(hook.user.id) if hook.user and isinstance(hook.user, discord.User) else None
-        if member and is_whitelisted(member):
-            continue
-        try:
-            await hook.delete(reason="Anti-Webhook aktiv")
-            log(f"Webhook {hook.name} gelöscht in #{channel.name}")
-        except (Forbidden, HTTPException, NotFound):
-            pass
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        webhook_strikes[actor.id] += 1
-        if webhook_strikes[actor.id] >= WEBHOOK_STRIKES_BEFORE_KICK:
-            await kick_member(guild, actor, "Zu viele Webhook-Erstellungen (3)")
-            webhook_strikes[actor.id] = 0
-
-# ---------- Anti Bot Join ----------
-@bot.event
-async def on_member_join(member: discord.Member):
-    if member.bot:
-        inviter = None
-        try:
-            async for entry in member.guild.audit_logs(limit=10, action=AuditLogAction.bot_add):
-                if entry.target.id == member.id:
-                    inviter = entry.user
-                    break
-        except Exception:
-            pass
-        if inviter and not is_whitelisted(inviter):
-            await kick_member(member.guild, member, "Bot wurde von nicht-whitelisted User eingeladen")
-            await kick_member(member.guild, inviter, "Bot eingeladen ohne Whitelist-Berechtigung")
-
-# ---------- Anti Role/Channel Delete ----------
-@bot.event
-async def on_guild_channel_delete(channel):
-    actor = await actor_from_audit_log(channel.guild, AuditLogAction.channel_delete, within_seconds=10)
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        await kick_member(channel.guild, actor, "Rolle/Kanal gelöscht ohne Berechtigung")
-
-@bot.event
-async def on_guild_role_delete(role):
-    actor = await actor_from_audit_log(role.guild, AuditLogAction.role_delete, within_seconds=10)
-    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
-        await kick_member(role.guild, actor, "Rolle/Kanal gelöscht ohne Berechtigung")
-
-# ---------- Commands ----------
-@bot.hybrid_command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
-async def add_whitelist(ctx: commands.Context, user: discord.User):
-    if not is_bot_admin(ctx):
-        return await ctx.reply("❌ Keine Berechtigung.")
-    whitelists[ctx.guild.id].add(user.id)
-    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** zur Whitelist hinzugefügt.")
-
-@bot.hybrid_command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
-async def remove_whitelist(ctx: commands.Context, user: discord.User):
-    if not is_bot_admin(ctx):
-        return await ctx.reply("❌ Keine Berechtigung.")
-    whitelists[ctx.guild.id].discard(user.id)
-    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** von der Whitelist entfernt.")
-
-@bot.hybrid_command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
-async def show_whitelist(ctx: commands.Context):
-    users = whitelists[ctx.guild.id]
-    if not users:
-        return await ctx.reply("ℹ️ Whitelist ist leer.")
-    resolved = []
-    for uid in users:
-        try:
-            user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-            resolved.append(user.name if user else str(uid))
-        except Exception:
-            resolved.append(str(uid))
-    await ctx.reply("📜 Whitelist:\n" + "\n".join(resolved))
-
-@bot.hybrid_command(name="addblacklist", description="Fügt einen User zur Blacklist hinzu (Owner/Admin Only)")
-async def add_blacklist(ctx: commands.Context, user: discord.User):
-    if not is_bot_admin(ctx):
-        return await ctx.reply("❌ Keine Berechtigung.")
-    blacklists[ctx.guild.id].add(user.id)
-    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** zur Blacklist hinzugefügt.")
-
-@bot.hybrid_command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
-async def remove_blacklist(ctx: commands.Context, user: discord.User):
-    if not is_bot_admin(ctx):
-        return await ctx.reply("❌ Keine Berechtigung.")
-    blacklists[ctx.guild.id].discard(user.id)
-    await ctx.reply(f"✅ User `{user}` wurde in **{ctx.guild.name}** von der Blacklist entfernt.")
-
-@bot.hybrid_command(name="showblacklist", description="Zeigt alle User in der Blacklist")
-async def show_blacklist(ctx: commands.Context):
-    users = blacklists[ctx.guild.id]
-    if not users:
-        return await ctx.reply("ℹ️ Blacklist ist leer.")
-    resolved = []
-    for uid in users:
-        try:
-            user = ctx.guild.get_member(uid) or await bot.fetch_user(uid)
-            resolved.append(user.name if user else str(uid))
-        except Exception:
-            resolved.append(str(uid))
-    await ctx.reply("🚫 Blacklist:\n" + "\n".join(resolved))
 
 # ---------- Start ----------
 if __name__ == "__main__":
