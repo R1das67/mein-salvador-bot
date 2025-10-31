@@ -36,10 +36,8 @@ intents.message_content = True
 intents.guilds = True
 intents.members = True
 intents.bans = True
-intents.presences = True
 intents.webhooks = True
 intents.guild_messages = True
-intents.guild_reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -120,7 +118,7 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
         log(f"Timeout failed for {member}: {e}")
 
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.35)
     try:
         now = datetime.now(timezone.utc)
         async for entry in guild.audit_logs(limit=15, action=action):
@@ -385,3 +383,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
