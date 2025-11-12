@@ -135,19 +135,18 @@ async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, tar
         log(f"Audit Log HTTP-Fehler: {e}")
     return None
 
-
 # ---------- Nachricht an Eigentümer nach Neustart ----------
 async def notify_owner_after_restart():
     await asyncio.sleep(3)
     message_text = (
-        "**__🌐 Globex Security 🌐__**\n"
-        "**@User**, lieber Eigentümer des Servers **(servername)**,\n"
+        "🌐 Globex Security 🌐\n"
+        "@User*, lieber Eigentümer des Servers **(servername)*,\n"
         "aufgrund dessen, dass mein Besitzer regelmäßig einen neuen Free-Plan bei einer Hosting-Website beantragen muss, "
         "wurde ich neu gestartet.\n"
         "Dabei werden leider die Nutzer in der Whitelist und Blacklist gelöscht.\n"
         "Bitte stelle daher deine Whitelist und Blacklist erneut ein.\n\n"
-        "**Mit freundlichen Grüßen,**\n"
-        "**__Globex Security__**"
+        "*Mit freundlichen Grüßen,*\n"
+        "_Globex Security_"
     )
 
     for guild in bot.guilds:
@@ -167,7 +166,6 @@ async def notify_owner_after_restart():
         except Exception as e:
             log(f"Fehler beim Benachrichtigen des Eigentümers in {guild.name}: {e}")
 
-
 # ---------- Events ----------
 @bot.event
 async def on_ready():
@@ -186,7 +184,6 @@ async def on_ready():
         log("Alle Slash Commands global synchronisiert ✅")
     except Exception as e:
         log(f"Fehler beim globalen Slash Command Sync: {e}")
-
 
 # ---------- Anti Ban/Kick Spamm ----------
 async def track_ban_kick(actor: discord.Member, action_type: str):
@@ -212,7 +209,6 @@ async def on_member_remove(member: discord.Member):
     actor = await actor_from_audit_log(guild, AuditLogAction.kick, target_id=member.id, within_seconds=30)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await track_ban_kick(actor, "kick")
-
 
 # ---------- Anti Webhook / Anti Invite / Anti Mention Spam ----------
 @bot.event
@@ -260,7 +256,6 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-
 # ---------- Anti Webhook ----------
 @bot.event
 async def on_webhooks_update(channel: discord.abc.GuildChannel):
@@ -288,7 +283,6 @@ async def on_webhooks_update(channel: discord.abc.GuildChannel):
             await kick_member(guild, actor, "Zu viele Webhook-Erstellungen (3)")
             webhook_strikes[actor.id] = 0
 
-
 # ---------- Anti Bot Join ----------
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -305,7 +299,6 @@ async def on_member_join(member: discord.Member):
             await kick_member(member.guild, member, "Bot wurde von nicht-whitelisted User eingeladen")
             await kick_member(member.guild, inviter, "Bot eingeladen ohne Whitelist-Berechtigung")
 
-
 # ---------- Anti Role/Channel Delete ----------
 @bot.event
 async def on_guild_channel_delete(channel):
@@ -319,27 +312,26 @@ async def on_guild_role_delete(role):
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(role.guild, actor, "Rolle gelöscht ohne Berechtigung")
 
-
 # ---------- Slash Commands ----------
 @bot.tree.command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
 async def add_whitelist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     whitelists[interaction.guild.id].add(user.id)
-    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** zur Whitelist hinzugefügt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* zur Whitelist hinzugefügt.", ephemeral=True)
 
 @bot.tree.command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
 async def remove_whitelist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     whitelists[interaction.guild.id].discard(user.id)
-    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** von der Whitelist entfernt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* von der Whitelist entfernt.", ephemeral=True)
 
 @bot.tree.command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
 async def show_whitelist(interaction: discord.Interaction):
     users = whitelists[interaction.guild.id]
     if not users:
-        return await interaction.response.send_message("ℹ️ Whitelist ist leer.", ephemeral=True)
+        return await interaction.response.send_message("ℹ Whitelist ist leer.", ephemeral=True)
     resolved = []
     for uid in users:
         try:
@@ -354,20 +346,20 @@ async def add_blacklist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     blacklists[interaction.guild.id].add(user.id)
-    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** zur Blacklist hinzugefügt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* zur Blacklist hinzugefügt.", ephemeral=True)
 
 @bot.tree.command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
 async def remove_blacklist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     blacklists[interaction.guild.id].discard(user.id)
-    await interaction.response.send_message(f"✅ User `{user}` wurde in **{interaction.guild.name}** von der Blacklist entfernt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* von der Blacklist entfernt.", ephemeral=True)
 
 @bot.tree.command(name="showblacklist", description="Zeigt alle User in der Blacklist")
 async def show_blacklist(interaction: discord.Interaction):
     users = blacklists[interaction.guild.id]
     if not users:
-        return await interaction.response.send_message("ℹ️ Blacklist ist leer.", ephemeral=True)
+        return await interaction.response.send_message("ℹ Blacklist ist leer.", ephemeral=True)
     resolved = []
     for uid in users:
         try:
@@ -377,11 +369,31 @@ async def show_blacklist(interaction: discord.Interaction):
             resolved.append(str(uid))
     await interaction.response.send_message("🚫 Blacklist:\n" + "\n".join(resolved), ephemeral=True)
 
+# ---------- Neuer Slash Command: Create Webhook ----------
+@bot.tree.command(name="create-webhook", description="Erstellt einen Webhook (Whitelist Only)")
+async def create_webhook(interaction: discord.Interaction, channel: discord.TextChannel, name: str):
+    if not is_whitelisted(interaction.user):
+        return await interaction.response.send_message("❌ Du bist nicht whitelisted!", ephemeral=True)
+
+    try:
+        hook = await channel.create_webhook(name=name, reason=f"Erstellt von whitelisted User {interaction.user}")
+        existing_webhooks[interaction.guild.id].add(hook.id)
+        # Webhook Ablauf in 1 Woche
+        async def delete_later():
+            await asyncio.sleep(7 * 24 * 60 * 60)
+            try:
+                await hook.delete(reason="Webhook Ablauf nach 1 Woche")
+                existing_webhooks[interaction.guild.id].discard(hook.id)
+            except:
+                pass
+        asyncio.create_task(delete_later())
+
+        await interaction.response.send_message(f"✅ Webhook erstellt: {hook.url}", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Fehler beim Erstellen des Webhooks: {e}", ephemeral=True)
 
 # ---------- Start ----------
-if __name__ == "__main__":
+if _name_ == "_main_":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
-
