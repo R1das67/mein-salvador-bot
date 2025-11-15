@@ -175,10 +175,8 @@ async def on_ready():
         activity=discord.Game("Bereit zum Beschützen!")
     )
 
-    # Nachricht an Eigentümer nach Neustart
     asyncio.create_task(notify_owner_after_restart())
 
-    # Globale Synchronisierung aller Slash Commands
     try:
         await bot.tree.sync()
         log("Alle Slash Commands global synchronisiert ✅")
@@ -299,18 +297,27 @@ async def on_member_join(member: discord.Member):
             await kick_member(member.guild, member, "Bot wurde von nicht-whitelisted User eingeladen")
             await kick_member(member.guild, inviter, "Bot eingeladen ohne Whitelist-Berechtigung")
 
-# ---------- Anti Role/Channel Delete ----------
+# ---------- Anti Channel Delete ----------
 @bot.event
 async def on_guild_channel_delete(channel):
     actor = await actor_from_audit_log(channel.guild, AuditLogAction.channel_delete, within_seconds=10)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(channel.guild, actor, "Kanal gelöscht ohne Berechtigung")
 
+# ---------- Anti Role Delete ----------
 @bot.event
 async def on_guild_role_delete(role):
     actor = await actor_from_audit_log(role.guild, AuditLogAction.role_delete, within_seconds=10)
     if isinstance(actor, discord.Member) and not is_whitelisted(actor):
         await kick_member(role.guild, actor, "Rolle gelöscht ohne Berechtigung")
+
+# ---------- 🆕 Anti Channel Create ----------
+@bot.event
+async def on_guild_channel_create(channel):
+    actor = await actor_from_audit_log(channel.guild, AuditLogAction.channel_create, within_seconds=10)
+
+    if isinstance(actor, discord.Member) and not is_whitelisted(actor):
+        await kick_member(channel.guild, actor, "Kanal erstellt ohne Whitelist-Berechtigung")
 
 # ---------- Slash Commands ----------
 @bot.tree.command(name="addwhitelist", description="Fügt einen User zur Whitelist hinzu (Owner/Admin Only)")
@@ -378,7 +385,7 @@ async def create_webhook(interaction: discord.Interaction, channel: discord.Text
     try:
         hook = await channel.create_webhook(name=name, reason=f"Erstellt von whitelisted User {interaction.user}")
         existing_webhooks[interaction.guild.id].add(hook.id)
-        # Webhook Ablauf in 1 Woche
+
         async def delete_later():
             await asyncio.sleep(7 * 24 * 60 * 60)
             try:
@@ -386,6 +393,7 @@ async def create_webhook(interaction: discord.Interaction, channel: discord.Text
                 existing_webhooks[interaction.guild.id].discard(hook.id)
             except:
                 pass
+
         asyncio.create_task(delete_later())
 
         await interaction.response.send_message(f"✅ Webhook erstellt: {hook.url}", ephemeral=True)
@@ -397,4 +405,3 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
-
