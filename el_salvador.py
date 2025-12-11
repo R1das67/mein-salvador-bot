@@ -123,7 +123,7 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
 
     # Neuer Abschnitt (statt festem sleep(0.35))
-    for delay in (0.1, 0.2, 0.3):
+    for delay in (0.002,0.005,0.01,0.02,0.04,0.05,0.1, 0.2, 0.3):
         await asyncio.sleep(delay)
 
         try:
@@ -422,3 +422,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Fehlende Umgebungsvariable DISCORD_TOKEN.")
     bot.run(TOKEN)
+
