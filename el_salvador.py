@@ -117,33 +117,45 @@ async def timeout_member(member: discord.Member, hours: int, reason: str):
     except (Forbidden, HTTPException, NotFound) as e:
         log(f"Timeout failed for {member}: {e}")
 
+# -----------------------------------------------------------
+#  🔥 OPTIMIERTER ABSCHNITT (0.1 / 0.2 / 0.3 Retry System)
+# -----------------------------------------------------------
 async def actor_from_audit_log(guild: discord.Guild, action: AuditLogAction, target_id: int | None = None, within_seconds: int = 10):
-    await asyncio.sleep(0.35)
-    try:
-        now = datetime.now(timezone.utc)
-        async for entry in guild.audit_logs(limit=15, action=action):
-            if (now - entry.created_at).total_seconds() > within_seconds:
-                continue
-            if target_id is not None and getattr(entry.target, "id", None) != target_id:
-                continue
-            return entry.user
-    except Forbidden:
-        log("Keine Berechtigung, Audit-Logs zu lesen.")
-    except NotFound:
-        log(f"Audit Log Fehler: Guild {guild.id} nicht gefunden.")
-    except HTTPException as e:
-        log(f"Audit Log HTTP-Fehler: {e}")
+
+    # Neuer Abschnitt (statt festem sleep(0.35))
+    for delay in (0.1, 0.2, 0.3):
+        await asyncio.sleep(delay)
+
+        try:
+            now = datetime.now(timezone.utc)
+            async for entry in guild.audit_logs(limit=15, action=action):
+                if (now - entry.created_at).total_seconds() > within_seconds:
+                    continue
+                if target_id is not None and getattr(entry.target, "id", None) != target_id:
+                    continue
+                return entry.user
+        except Forbidden:
+            log("Keine Berechtigung, Audit-Logs zu lesen.")
+        except NotFound:
+            log(f"Audit Log Fehler: Guild {guild.id} nicht gefunden.")
+        except HTTPException as e:
+            log(f"Audit Log HTTP-Fehler: {e}")
+
     return None
+# -----------------------------------------------------------
+
 
 # ---------- Nachricht an Eigentümer nach Neustart ----------
 async def notify_owner_after_restart():
     await asyncio.sleep(3)
+
     message_text = (
         "🌐 Globex Security 🌐\n"
-        "@User*, lieber Eigentümer des Servers **(servername)*,\n"
+        "@User*, lieber Eigentümer des Servers **(servername)**,\n"
         "aufgrund dessen, dass mein Besitzer regelmäßig einen neuen Free-Plan bei einer Hosting-Website beantragen muss, "
         "wurde ich neu gestartet.\n"
         "Dabei werden leider die Nutzer in der Whitelist und Blacklist gelöscht.\n"
+        "```Natürlich liegt es nicht nur am Free-Plan, sondern auch daran, dass mein Besitzer den Code anpasst, mich weiterentwickelt und verbessert.```\n"
         "Bitte stelle daher deine Whitelist und Blacklist erneut ein.\n\n"
         "*Mit freundlichen Grüßen,*\n"
         "_Globex Security_"
@@ -154,18 +166,23 @@ async def notify_owner_after_restart():
             owner = guild.owner or await bot.fetch_user(guild.owner_id)
             if owner:
                 try:
-                    await owner.send(message_text.replace("@User", owner.mention).replace("(servername)", guild.name))
+                    await owner.send(
+                        message_text.replace("@User", owner.mention)
+                                    .replace("(servername)", guild.name)
+                    )
                     log(f"Neustart-Nachricht an {owner} per DM gesendet ({guild.name})")
                 except (Forbidden, HTTPException):
                     channel = discord.utils.get(guild.text_channels, name="moderator-only")
                     if channel:
-                        await channel.send(message_text.replace("@User", owner.mention).replace("(servername)", guild.name))
+                        await channel.send(
+                            message_text.replace("@User", owner.mention)
+                                        .replace("(servername)", guild.name)
+                        )
                         log(f"Neustart-Nachricht an #{channel.name} in {guild.name} gesendet")
                     else:
                         log(f"Kein 'moderator-only'-Kanal in {guild.name} gefunden.")
         except Exception as e:
             log(f"Fehler beim Benachrichtigen des Eigentümers in {guild.name}: {e}")
-
 # ---------- Events ----------
 @bot.event
 async def on_ready():
@@ -325,14 +342,14 @@ async def add_whitelist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     whitelists[interaction.guild.id].add(user.id)
-    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* zur Whitelist hinzugefügt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in {interaction.guild.name} zur Whitelist hinzugefügt.", ephemeral=True)
 
 @bot.tree.command(name="removewhitelist", description="Entfernt einen User von der Whitelist (Owner/Admin Only)")
 async def remove_whitelist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     whitelists[interaction.guild.id].discard(user.id)
-    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* von der Whitelist entfernt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in {interaction.guild.name} von der Whitelist entfernt.", ephemeral=True)
 
 @bot.tree.command(name="showwhitelist", description="Zeigt alle User in der Whitelist")
 async def show_whitelist(interaction: discord.Interaction):
@@ -353,14 +370,14 @@ async def add_blacklist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     blacklists[interaction.guild.id].add(user.id)
-    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* zur Blacklist hinzugefügt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in {interaction.guild.name} zur Blacklist hinzugefügt.", ephemeral=True)
 
 @bot.tree.command(name="removeblacklist", description="Entfernt einen User von der Blacklist (Owner/Admin Only)")
 async def remove_blacklist(interaction: discord.Interaction, user: discord.User):
     if not is_bot_admin(interaction):
         return await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
     blacklists[interaction.guild.id].discard(user.id)
-    await interaction.response.send_message(f"✅ User {user} wurde in *{interaction.guild.name}* von der Blacklist entfernt.", ephemeral=True)
+    await interaction.response.send_message(f"✅ User {user} wurde in {interaction.guild.name} von der Blacklist entfernt.", ephemeral=True)
 
 @bot.tree.command(name="showblacklist", description="Zeigt alle User in der Blacklist")
 async def show_blacklist(interaction: discord.Interaction):
